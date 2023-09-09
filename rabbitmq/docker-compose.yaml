@@ -27,16 +27,16 @@ services:
     networks:
       - dev-network
     depends_on:
-      - sender
+      - vegaterminal
       - message-broker
 
   # Create service with Gin sender.
-  sender:
-    container_name: sender
+  vegaterminal:
+    container_name: vegaterminal
     ports:
       - 3000:3000
     build:
-      context: sender
+      context: vegaterminal
       dockerfile: Dockerfile
     environment:
       AMQP_SERVER_URL: amqp://guest:guest@message-broker:5672/

@@ -3,58 +3,64 @@
 package main
 
 import (
-	"log"
+	"context"
+	"fmt"
 	"os"
+	"time"
 
-	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/pmorelli92/bunnify/bunnify"
 )
 
 func main() {
 	// Define RabbitMQ server URL.
 	amqpServerURL := os.Getenv("AMQP_SERVER_URL")
 
-	// Create a new RabbitMQ connection.
-	connectRabbitMQ, err := amqp.Dial(amqpServerURL)
-	if err != nil {
-		panic(err)
-	}
-	defer connectRabbitMQ.Close()
+	// Setup
+	queueName := "vega-queue"
+	exchangeName := "vega-exchange"
+	routingKey := "vega.rpcCreated"
 
-	// Opening a channel to our RabbitMQ instance over
-	// the connection we have already established.
-	channelRabbitMQ, err := connectRabbitMQ.Channel()
-	if err != nil {
-		panic(err)
-	}
-	defer channelRabbitMQ.Close()
-
-	// Subscribing to QueueService1 for getting messages.
-	messages, err := channelRabbitMQ.Consume(
-		"QueueService1", // queue name
-		"",              // consumer
-		true,            // auto-ack
-		false,           // exclusive
-		false,           // no local
-		false,           // no wait
-		nil,             // arguments
-	)
-	if err != nil {
-		log.Println(err)
+	type RPC struct {
+		Method string                 `json:"method"`
+		Params map[string]interface{} `json:"params"`
 	}
 
-	// Build a welcome message.
-	log.Println("Successfully connected to RabbitMQ")
-	log.Println("Waiting for messages")
-
-	// Make a channel to receive messages into infinite loop.
-	forever := make(chan bool)
-
+	exitCh := make(chan bool)
+	notificationChannel := make(chan bunnify.Notification)
 	go func() {
-		for message := range messages {
-			// For example, show received message in a console.
-			log.Printf(" > Received message: %s\n", message.Body)
+		for {
+			select {
+			case n := <-notificationChannel:
+				fmt.Println(n)
+			case <-exitCh:
+				return
+			}
 		}
 	}()
 
-	<-forever
+	// Create a new RabbitMQ connection.
+	connection := bunnify.NewConnection(
+		bunnify.WithURI(amqpServerURL),
+		bunnify.WithReconnectInterval(1*time.Second),
+		bunnify.WithNotificationChannel(notificationChannel))
+
+	connection.Start()
+
+	var rpc bunnify.ConsumableEvent[RPC]
+	eventHandler := func(ctx context.Context, event bunnify.ConsumableEvent[RPC]) error {
+		rpc = event
+		fmt.Println(rpc)
+		return nil
+	}
+
+	consumer := connection.NewConsumer(
+		queueName,
+		bunnify.WithQuorumQueue(),
+		bunnify.WithBindingToExchange(exchangeName),
+		bunnify.WithHandler(routingKey, eventHandler))
+
+	if err := consumer.Consume(); err != nil {
+		fmt.Println(err)
+	}
+	<-exitCh
 }

@@ -18,6 +18,10 @@ func main() {
 	// Define RabbitMQ server URL.
 	amqpServerURL := os.Getenv("AMQP_SERVER_URL")
 
+	// Setup
+	exchangeName := "vega-exchange"
+	routingKey := "vega.rpcCreated"
+
 	exitCh := make(chan bool)
 	notificationChannel := make(chan bunnify.Notification)
 	go func() {
@@ -39,7 +43,7 @@ func main() {
 
 	connection.Start()
 
-	publisher := bunnify.NewPublisher()
+	publisher := connection.NewPublisher()
 
 	r := gin.Default()
 	r.POST("/rpc/:node", func(c *gin.Context) {
@@ -58,7 +62,7 @@ func main() {
 
 		eventToPublish := bunnify.NewPublishableEvent(rpcRequest)
 
-		err := publisher.Publish(context.TODO(), "vega-terminal-exchange", "vega-terminal-routingkey", eventToPublish)
+		err := publisher.Publish(context.TODO(), exchangeName, routingKey, eventToPublish)
 		if err != nil {
 			fmt.Println(err)
 			return

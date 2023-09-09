@@ -1,6 +1,6 @@
 # ./Dockerfile-sender
 
-FROM golang:1.18-alpine AS builder
+FROM golang:1.20-alpine AS builder
 
 # Move to working directory (/build).
 WORKDIR /build
