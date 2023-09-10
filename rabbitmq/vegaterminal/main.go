@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,6 +14,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pmorelli92/bunnify/bunnify"
 )
+
+type Response struct {
+	Message string `json:"message"`
+}
+
+var counter = 0
+var rpcResponseChannel = make(chan bunnify.ConsumableEvent[Response])
 
 func main() {
 
@@ -25,17 +33,13 @@ func main() {
 	responseQueueName := "vega-response-queue"
 	responseRoutingKey := "vega.response"
 
-	type Response struct {
-		Message string `json:"message"`
-	}
-
 	exitCh := make(chan bool)
 	notificationChannel := make(chan bunnify.Notification)
 	go func() {
 		for {
 			select {
 			case n := <-notificationChannel:
-				fmt.Println(n)
+				log.Println(n)
 			case <-exitCh:
 				return
 			}
@@ -52,15 +56,23 @@ func main() {
 
 	publisher := connection.NewPublisher()
 
-	counter := 0
+	consumer := connection.NewConsumer(
+		responseQueueName,
+		bunnify.WithQuorumQueue(),
+		bunnify.WithBindingToExchange(exchangeName),
+		bunnify.WithHandler(responseRoutingKey, handleRPCResponse))
+
+	if err := consumer.Consume(); err != nil {
+		log.Println(err)
+	}
 
 	r := gin.Default()
 
-	done := make(chan bunnify.ConsumableEvent[Response])
 	r.POST("/rpc/:node", func(c *gin.Context) {
+		log.Println("Received rpc request")
 
 		node := c.Params.ByName("node")
-		fmt.Println("Node: " + node)
+		log.Println("Node: " + node)
 		// Create a message to publish.
 		var rpcRequest map[string]interface{}
 
@@ -76,42 +88,30 @@ func main() {
 			fmt.Println(err)
 			return
 		}
-
-		var rpcResponseEvent bunnify.ConsumableEvent[Response]
-
-		receiveRPCResponse := func(ctx context.Context, event bunnify.ConsumableEvent[Response]) error {
-			counter++
-			fmt.Println("Entering receiveRPCResponse: " + strconv.Itoa(counter))
-
-			//response := event.Payload
-			rpcResponseEvent = event
-			fmt.Println("rpcResponseEvent: " + rpcResponseEvent.Payload.Message)
-			fmt.Println("event: " + event.Payload.Message)
-
-			done <- rpcResponseEvent
-			//fmt.Println("Waiting to send " + response.Message + " to receiveRPCChannel")
-			//fmt.Println("Done sending to receiveRPCChannel")
-			fmt.Println("Leaving receiveRPCResponse: " + strconv.Itoa(counter))
-			return nil
-		}
-		consumer := connection.NewConsumer(
-			responseQueueName,
-			bunnify.WithQuorumQueue(),
-			bunnify.WithBindingToExchange(exchangeName),
-			bunnify.WithHandler(responseRoutingKey, receiveRPCResponse))
-
-		if err := consumer.Consume(); err != nil {
-			fmt.Println(err)
-		}
+		log.Println("Published rpc")
 
 		//fmt.Println("Waiting for message from messageReceived")
-		rpcResponseEvent = <-done
-		fmt.Println("Returning rpcResponseEvent: " + rpcResponseEvent.Payload.Message)
-		c.String(http.StatusOK, rpcResponseEvent.Payload.Message)
+		log.Println("Waiting for a response on rpcResponseChannel")
+		rpcResponse := <-rpcResponseChannel
+		log.Println("Received rpcResponse on channel, sending response: " + rpcResponse.Payload.Message)
+		c.String(http.StatusOK, rpcResponse.Payload.Message)
 		//time.Sleep(time.Duration(1) * time.Second)
 		//fmt.Println("Received message " + rpcResponseEvent.Payload.Message + " receiveRPCChannel")
 
 	})
 
 	r.Run(":3000") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
+}
+
+func handleRPCResponse(ctx context.Context, event bunnify.ConsumableEvent[Response]) error {
+	counter++
+	log.Println("Entering receiveRPCResponse: " + strconv.Itoa(counter))
+
+	log.Println("Sending response to rpcResposneChannel: " + event.Payload.Message)
+
+	rpcResponseChannel <- event
+	//fmt.Println("Waiting to send " + response.Message + " to receiveRPCChannel")
+	//fmt.Println("Done sending to receiveRPCChannel")
+	log.Println("Leaving receiveRPCResponse: " + strconv.Itoa(counter))
+	return nil
 }

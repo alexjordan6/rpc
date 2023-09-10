@@ -4,5 +4,17 @@ curl -X POST -H "Content-Type: application/json" \
 
 
 curl -X POST -H "Content-Type: application/json" \
-    -d '{"method": "sleep", "params": { "time": 1 }}' \
+    -d '{"method": "sleep", "params": { "time": 5 }}' \
     http://localhost:3000/rpc/1234
+
+curl -X POST -H "Content-Type: application/json" \
+    -d '{"method": "sleep", "params": { "time": 3 }}' \
+    http://localhost:3000/rpc/1234 &
+curl -X POST -H "Content-Type: application/json" \
+    -d '{"method": "sleep", "params": { "time": 3 }}' \
+    http://localhost:3000/rpc/1234 &
+curl -X POST -H "Content-Type: application/json" \
+    -d '{"method": "sleep", "params": { "time": 3 }}' \
+    http://localhost:3000/rpc/1234 &
+
+

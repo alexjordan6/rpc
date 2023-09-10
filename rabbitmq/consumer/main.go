@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"time"
@@ -37,7 +38,7 @@ func main() {
 		for {
 			select {
 			case n := <-notificationChannel:
-				fmt.Println(n)
+				log.Println(n)
 			case <-exitCh:
 				return
 			}
@@ -57,8 +58,8 @@ func main() {
 	counter := 0
 	processRPC := func(ctx context.Context, event bunnify.ConsumableEvent[RPC]) error {
 		counter++
-		fmt.Println("Starting processRPC: " + strconv.Itoa(counter))
-		fmt.Println(event)
+		log.Println("Starting processRPC: " + strconv.Itoa(counter))
+		log.Println(event)
 		rpc := event.Payload
 		timeParam, ok := rpc.Params["time"].(float64)
 
@@ -71,12 +72,12 @@ func main() {
 
 			err := publisher.Publish(context.TODO(), exchangeName, responseRoutingKey, response)
 			if err != nil {
-				fmt.Println(err)
+				log.Println(err)
 				return nil
 			}
 			return nil
 		} else {
-			fmt.Println(fmt.Sprintf("RPC %s could not be processed", event.Payload))
+			log.Println(fmt.Sprintf("RPC %s could not be processed", event.Payload))
 			return nil
 		}
 
@@ -89,7 +90,7 @@ func main() {
 		bunnify.WithHandler(routingKey, processRPC))
 
 	if err := consumer.Consume(); err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
 	<-exitCh
 }
