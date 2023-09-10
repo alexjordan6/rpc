@@ -1,0 +1,8 @@
+curl -X POST -H "Content-Type: application/json" \
+    -d '{"method": "test", "params": { "a": 1, "b": 2}}' \
+    http://localhost:3000/rpc/1234
+
+
+curl -X POST -H "Content-Type: application/json" \
+    -d '{"method": "sleep", "params": { "time": 1 }}' \
+    http://localhost:3000/rpc/1234

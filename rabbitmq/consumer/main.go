@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/pmorelli92/bunnify/bunnify"
@@ -19,10 +20,15 @@ func main() {
 	queueName := "vega-queue"
 	exchangeName := "vega-exchange"
 	routingKey := "vega.rpcCreated"
+	responseRoutingKey := "vega.response"
 
 	type RPC struct {
 		Method string                 `json:"method"`
 		Params map[string]interface{} `json:"params"`
+	}
+
+	type Response struct {
+		Message string `json:"message"`
 	}
 
 	exitCh := make(chan bool)
@@ -46,18 +52,41 @@ func main() {
 
 	connection.Start()
 
-	var rpc bunnify.ConsumableEvent[RPC]
-	eventHandler := func(ctx context.Context, event bunnify.ConsumableEvent[RPC]) error {
-		rpc = event
-		fmt.Println(rpc)
-		return nil
+	publisher := connection.NewPublisher()
+
+	counter := 0
+	processRPC := func(ctx context.Context, event bunnify.ConsumableEvent[RPC]) error {
+		counter++
+		fmt.Println("Starting processRPC: " + strconv.Itoa(counter))
+		fmt.Println(event)
+		rpc := event.Payload
+		timeParam, ok := rpc.Params["time"].(float64)
+
+		if ok {
+			seconds := int(timeParam)
+			time.Sleep(time.Duration(seconds) * time.Second)
+			response := bunnify.NewPublishableEvent(Response{
+				Message: strconv.Itoa(counter),
+			})
+
+			err := publisher.Publish(context.TODO(), exchangeName, responseRoutingKey, response)
+			if err != nil {
+				fmt.Println(err)
+				return nil
+			}
+			return nil
+		} else {
+			fmt.Println(fmt.Sprintf("RPC %s could not be processed", event.Payload))
+			return nil
+		}
+
 	}
 
 	consumer := connection.NewConsumer(
 		queueName,
 		bunnify.WithQuorumQueue(),
 		bunnify.WithBindingToExchange(exchangeName),
-		bunnify.WithHandler(routingKey, eventHandler))
+		bunnify.WithHandler(routingKey, processRPC))
 
 	if err := consumer.Consume(); err != nil {
 		fmt.Println(err)

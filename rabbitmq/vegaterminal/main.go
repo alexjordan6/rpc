@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,12 @@ func main() {
 	// Setup
 	exchangeName := "vega-exchange"
 	routingKey := "vega.rpcCreated"
+	responseQueueName := "vega-response-queue"
+	responseRoutingKey := "vega.response"
+
+	type Response struct {
+		Message string `json:"message"`
+	}
 
 	exitCh := make(chan bool)
 	notificationChannel := make(chan bunnify.Notification)
@@ -45,20 +52,22 @@ func main() {
 
 	publisher := connection.NewPublisher()
 
+	counter := 0
+
 	r := gin.Default()
+
+	done := make(chan bunnify.ConsumableEvent[Response])
 	r.POST("/rpc/:node", func(c *gin.Context) {
-		node := c.Params.ByName("name")
 
-		fmt.Println(node)
-
+		node := c.Params.ByName("node")
+		fmt.Println("Node: " + node)
+		// Create a message to publish.
 		var rpcRequest map[string]interface{}
 
 		if err := c.ShouldBindJSON(&rpcRequest); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-
-		// Create a message to publish.
 
 		eventToPublish := bunnify.NewPublishableEvent(rpcRequest)
 
@@ -68,7 +77,40 @@ func main() {
 			return
 		}
 
-		c.String(http.StatusOK, "pong")
+		var rpcResponseEvent bunnify.ConsumableEvent[Response]
+
+		receiveRPCResponse := func(ctx context.Context, event bunnify.ConsumableEvent[Response]) error {
+			counter++
+			fmt.Println("Entering receiveRPCResponse: " + strconv.Itoa(counter))
+
+			//response := event.Payload
+			rpcResponseEvent = event
+			fmt.Println("rpcResponseEvent: " + rpcResponseEvent.Payload.Message)
+			fmt.Println("event: " + event.Payload.Message)
+
+			done <- rpcResponseEvent
+			//fmt.Println("Waiting to send " + response.Message + " to receiveRPCChannel")
+			//fmt.Println("Done sending to receiveRPCChannel")
+			fmt.Println("Leaving receiveRPCResponse: " + strconv.Itoa(counter))
+			return nil
+		}
+		consumer := connection.NewConsumer(
+			responseQueueName,
+			bunnify.WithQuorumQueue(),
+			bunnify.WithBindingToExchange(exchangeName),
+			bunnify.WithHandler(responseRoutingKey, receiveRPCResponse))
+
+		if err := consumer.Consume(); err != nil {
+			fmt.Println(err)
+		}
+
+		//fmt.Println("Waiting for message from messageReceived")
+		rpcResponseEvent = <-done
+		fmt.Println("Returning rpcResponseEvent: " + rpcResponseEvent.Payload.Message)
+		c.String(http.StatusOK, rpcResponseEvent.Payload.Message)
+		//time.Sleep(time.Duration(1) * time.Second)
+		//fmt.Println("Received message " + rpcResponseEvent.Payload.Message + " receiveRPCChannel")
+
 	})
 
 	r.Run(":3000") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
